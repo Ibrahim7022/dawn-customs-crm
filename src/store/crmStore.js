@@ -540,14 +540,37 @@ export const useCrmStore = create(
           j.status === 'delivered'
         );
         
-        const totalRevenue = state.payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+        // Calculate revenue from payments
+        const paymentsRevenue = state.payments.reduce((sum, p) => sum + (p.amount || 0), 0);
         
+        // Calculate revenue from completed jobs
+        const completedJobsRevenue = state.jobs
+          .filter(j => j.status === 'delivered' && j.totalPrice)
+          .reduce((sum, j) => sum + (j.totalPrice || 0), 0);
+        
+        // Total revenue = payments + completed jobs
+        const totalRevenue = paymentsRevenue + completedJobsRevenue;
+        
+        // Monthly payments revenue
         const monthlyPayments = state.payments.filter(p => {
           const created = new Date(p.createdAt);
           return created.getMonth() === now.getMonth() && 
                  created.getFullYear() === now.getFullYear();
         });
-        const monthlyRevenue = monthlyPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+        const monthlyPaymentsRevenue = monthlyPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+        
+        // Monthly completed jobs revenue
+        const monthlyCompletedJobs = state.jobs.filter(j => {
+          const completed = j.status === 'delivered';
+          if (!completed) return false;
+          const updated = new Date(j.updatedAt);
+          return updated.getMonth() === now.getMonth() && 
+                 updated.getFullYear() === now.getFullYear();
+        });
+        const monthlyCompletedJobsRevenue = monthlyCompletedJobs.reduce((sum, j) => sum + (j.totalPrice || 0), 0);
+        
+        // Total monthly revenue
+        const monthlyRevenue = monthlyPaymentsRevenue + monthlyCompletedJobsRevenue;
 
         const totalExpenses = state.expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
         
