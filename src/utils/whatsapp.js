@@ -80,6 +80,29 @@ Email: ${data.email || 'N/A'}
 ━━━━━━━━━━━━━━━
 📅 ${timestamp}`;
 
+    case 'estimate_sent':
+      const itemsText = data.items.map((item, i) => 
+        `${i + 1}. ${item.description} - ₹${item.rate} × ${item.quantity} = ₹${item.quantity * item.rate}`
+      ).join('\n');
+      return `📋 *ESTIMATE SENT*
+━━━━━━━━━━━━━━━
+Estimate #: ${data.estimateNumber}
+Business: ${data.businessName}
+
+Items:
+${itemsText}
+
+Subtotal: ₹${data.subtotal.toLocaleString()}
+Tax: ₹${data.tax.toLocaleString()}
+*Total: ₹${data.total.toLocaleString()}*
+
+Valid Until: ${data.validUntil}
+
+View & Respond:
+${data.estimateLink}
+━━━━━━━━━━━━━━━
+📅 ${timestamp}`;
+
     case 'job_deleted':
       return `🗑️ *JOB DELETED*
 ━━━━━━━━━━━━━━━

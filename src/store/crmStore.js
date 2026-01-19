@@ -104,8 +104,37 @@ export const useCrmStore = create(
           notifyStatusChange: true,
           notifyJobComplete: true,
           notifyNewCustomer: false,
+        },
+        emailjs: {
+          enabled: false,
+          serviceId: '',
+          templateId: '',
+          publicKey: ''
         }
       },
+
+      // ============ AUTHENTICATION ============
+      users: [
+        {
+          id: uuidv4(),
+          username: 'admin',
+          password: 'admin123', // In production, this should be hashed
+          role: 'admin',
+          name: 'Administrator',
+          email: 'admin@dawncustoms.com',
+          createdAt: new Date().toISOString()
+        },
+        {
+          id: uuidv4(),
+          username: 'manager',
+          password: 'manager123', // In production, this should be hashed
+          role: 'manager',
+          name: 'Manager',
+          email: 'manager@dawncustoms.com',
+          createdAt: new Date().toISOString()
+        }
+      ],
+      currentUser: null,
 
       // ============ JOBS ============
       addJob: (job) => set((state) => ({
@@ -241,11 +270,14 @@ export const useCrmStore = create(
       // ============ ESTIMATES ============
       addEstimate: (estimate) => set((state) => {
         const estimateNumber = state.settings.nextEstimateNumber;
+        // Generate unique token for public access
+        const publicToken = uuidv4().replace(/-/g, '').substring(0, 16);
         return {
           estimates: [...state.estimates, { 
             ...estimate, 
             id: uuidv4(),
             estimateNumber: `${state.settings.estimatePrefix}${estimateNumber}`,
+            publicToken, // Unique token for public access
             status: estimate.status || 'draft',
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
@@ -266,6 +298,49 @@ export const useCrmStore = create(
       deleteEstimate: (id) => set((state) => ({
         estimates: state.estimates.filter(est => est.id !== id)
       })),
+
+      getEstimateByToken: (token) => {
+        const state = get();
+        return state.estimates.find(e => e.publicToken === token);
+      },
+
+      acceptEstimate: (token) => {
+        const state = get();
+        const estimate = state.estimates.find(e => e.publicToken === token);
+        if (estimate) {
+          set((state) => ({
+            estimates: state.estimates.map(e => 
+              e.publicToken === token ? { 
+                ...e, 
+                status: 'accepted', 
+                acceptedAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+              } : e
+            )
+          }));
+          return true;
+        }
+        return false;
+      },
+
+      declineEstimate: (token) => {
+        const state = get();
+        const estimate = state.estimates.find(e => e.publicToken === token);
+        if (estimate) {
+          set((state) => ({
+            estimates: state.estimates.map(e => 
+              e.publicToken === token ? { 
+                ...e, 
+                status: 'declined', 
+                declinedAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+              } : e
+            )
+          }));
+          return true;
+        }
+        return false;
+      },
 
       convertEstimateToInvoice: (estimateId) => {
         const state = get();
@@ -606,6 +681,42 @@ export const useCrmStore = create(
           pendingTasks: state.tasks.filter(t => t.status !== 'completed').length,
         };
       },
+
+      // ============ AUTH FUNCTIONS ============
+      login: (username, password) => {
+        const state = get();
+        const user = state.users.find(
+          u => u.username === username && u.password === password
+        );
+        
+        if (user) {
+          set({ currentUser: user });
+          return true;
+        }
+        return false;
+      },
+
+      logout: () => {
+        set({ currentUser: null });
+      },
+
+      addUser: (user) => set((state) => ({
+        users: [...state.users, {
+          ...user,
+          id: uuidv4(),
+          createdAt: new Date().toISOString()
+        }]
+      })),
+
+      updateUser: (id, updates) => set((state) => ({
+        users: state.users.map(u => 
+          u.id === id ? { ...u, ...updates } : u
+        )
+      })),
+
+      deleteUser: (id) => set((state) => ({
+        users: state.users.filter(u => u.id !== id)
+      })),
     }),
     {
       name: 'crm-storage',

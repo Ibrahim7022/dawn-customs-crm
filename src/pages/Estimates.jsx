@@ -4,6 +4,8 @@ import { useCurrency } from '../hooks/useCurrency';
 import Modal from '../components/Modal';
 import EmptyState from '../components/EmptyState';
 import { format, addDays } from 'date-fns';
+import { sendEstimateEmail } from '../utils/email';
+import { sendWhatsAppNotification, formatJobNotification } from '../utils/whatsapp';
 import {
   Plus,
   Search,
@@ -15,7 +17,9 @@ import {
   CheckCircle,
   Clock,
   XCircle,
-  ArrowRight
+  ArrowRight,
+  Copy,
+  ExternalLink
 } from 'lucide-react';
 
 function Estimates() {
@@ -118,6 +122,128 @@ function Estimates() {
     if (window.confirm('Are you sure you want to delete this estimate?')) {
       deleteEstimate(id);
     }
+  };
+
+  const handleSendEstimate = async (estimate) => {
+    const customer = customers.find(c => c.id === estimate.customerId);
+    if (!customer) {
+      alert('Customer not found');
+      return;
+    }
+
+    // Check if customer has email or phone
+    if (!customer.email && !customer.phone) {
+      alert('Customer does not have an email or phone number. Please add contact information first.');
+      return;
+    }
+
+    // Generate public link
+    const baseUrl = window.location.origin;
+    const estimateLink = `${baseUrl}/estimate/${estimate.publicToken}`;
+
+    const sentVia = [];
+    const errors = [];
+
+    try {
+      // Update status to sent
+      updateEstimate(estimate.id, { status: 'sent' });
+
+      // Send email if configured and customer has email
+      if (settings.emailjs?.enabled && settings.emailjs?.serviceId && settings.emailjs?.templateId && settings.emailjs?.publicKey) {
+        if (customer.email) {
+          try {
+            await sendEstimateEmail({
+              serviceId: settings.emailjs.serviceId,
+              templateId: settings.emailjs.templateId,
+              publicKey: settings.emailjs.publicKey,
+              toEmail: customer.email,
+              toName: customer.name,
+              estimateNumber: estimate.estimateNumber,
+              estimateLink: estimateLink,
+              businessName: settings.businessName,
+              items: estimate.items || [],
+              subtotal: estimate.subtotal || 0,
+              tax: estimate.tax || 0,
+              total: estimate.total || 0,
+              validUntil: estimate.validUntil ? format(new Date(estimate.validUntil), 'MMM d, yyyy') : 'N/A'
+            });
+            sentVia.push('Email');
+            console.log('Estimate email sent successfully');
+          } catch (error) {
+            console.error('Failed to send email:', error);
+            errors.push(`Email: ${error.message}`);
+          }
+        } else {
+          errors.push('Email: Customer does not have an email address');
+        }
+      } else {
+        errors.push('Email: EmailJS not configured in Settings');
+      }
+
+      // Send WhatsApp if configured and customer has phone
+      if (settings.whatsapp?.enabled && settings.whatsapp?.apiKey) {
+        if (customer.phone) {
+          try {
+            const whatsappMessage = formatJobNotification('estimate_sent', {
+              estimateNumber: estimate.estimateNumber,
+              businessName: settings.businessName,
+              items: estimate.items || [],
+              subtotal: estimate.subtotal || 0,
+              tax: estimate.tax || 0,
+              total: estimate.total || 0,
+              validUntil: estimate.validUntil ? format(new Date(estimate.validUntil), 'MMM d, yyyy') : 'N/A',
+              estimateLink: estimateLink
+            });
+            
+            await sendWhatsAppNotification(
+              customer.phone,
+              settings.whatsapp.apiKey,
+              whatsappMessage
+            );
+            sentVia.push('WhatsApp');
+            console.log('Estimate WhatsApp sent successfully');
+          } catch (error) {
+            console.error('Failed to send WhatsApp:', error);
+            errors.push(`WhatsApp: ${error.message || 'Failed to send'}`);
+          }
+        } else {
+          errors.push('WhatsApp: Customer does not have a phone number');
+        }
+      } else {
+        errors.push('WhatsApp: WhatsApp not configured in Settings');
+      }
+
+      // Show success/error message
+      if (sentVia.length > 0) {
+        alert(`✅ Estimate sent successfully via ${sentVia.join(' and ')}!\n\nEstimate #${estimate.estimateNumber} has been sent to ${customer.name}.${errors.length > 0 ? `\n\n⚠️ Issues:\n${errors.join('\n')}` : ''}`);
+      } else {
+        alert(`❌ Failed to send estimate.\n\n${errors.join('\n')}\n\nPlease configure EmailJS or WhatsApp in Settings, or ensure the customer has contact information.`);
+        // Revert status if nothing was sent
+        updateEstimate(estimate.id, { status: 'draft' });
+      }
+    } catch (error) {
+      console.error('Error sending estimate:', error);
+      alert('Failed to send estimate. Please try again.');
+      // Revert status on error
+      updateEstimate(estimate.id, { status: 'draft' });
+    }
+  };
+
+  const handleCopyLink = (estimate) => {
+    const baseUrl = window.location.origin;
+    const estimateLink = `${baseUrl}/estimate/${estimate.publicToken}`;
+    navigator.clipboard.writeText(estimateLink).then(() => {
+      alert('Link copied to clipboard!');
+    }).catch(() => {
+      // Fallback
+      const textArea = document.createElement('textarea');
+      textArea.value = estimateLink;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      alert('Link copied to clipboard!');
+    });
   };
 
   const handleConvertToInvoice = (id) => {
@@ -280,12 +406,34 @@ function Estimates() {
                           {estimate.status === 'draft' && (
                             <button 
                               className="btn btn-ghost btn-sm btn-icon"
-                              onClick={() => updateEstimate(estimate.id, { status: 'sent' })}
-                              title="Mark as Sent"
+                              onClick={() => handleSendEstimate(estimate)}
+                              title="Send Estimate (Email & WhatsApp)"
                               style={{ color: 'var(--info)' }}
                             >
                               <Send size={16} />
                             </button>
+                          )}
+                          {estimate.status === 'sent' && estimate.publicToken && (
+                            <>
+                              <button 
+                                className="btn btn-ghost btn-sm btn-icon"
+                                onClick={() => handleCopyLink(estimate)}
+                                title="Copy Public Link"
+                                style={{ color: 'var(--accent-primary)' }}
+                              >
+                                <Copy size={16} />
+                              </button>
+                              <a
+                                href={`/estimate/${estimate.publicToken}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="btn btn-ghost btn-sm btn-icon"
+                                title="View Public Page"
+                                style={{ color: 'var(--accent-primary)' }}
+                              >
+                                <ExternalLink size={16} />
+                              </a>
+                            </>
                           )}
                           {(estimate.status === 'sent' || estimate.status === 'accepted') && (
                             <button 

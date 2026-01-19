@@ -17,7 +17,13 @@ import {
   MessageCircle,
   Bell,
   CheckCircle2,
-  Send
+  Send,
+  Mail,
+  Users,
+  User,
+  Shield,
+  Lock,
+  Key
 } from 'lucide-react';
 
 function Settings() {
@@ -34,6 +40,16 @@ function Settings() {
   const [statusForm, setStatusForm] = useState({ name: '', color: '#6366f1' });
   const [testingWhatsApp, setTestingWhatsApp] = useState(false);
   const [whatsAppTestResult, setWhatsAppTestResult] = useState(null);
+  const [testingEmail, setTestingEmail] = useState(false);
+  const [emailTestResult, setEmailTestResult] = useState(null);
+  
+  // User management
+  const users = useCrmStore((state) => state.users);
+  const currentUser = useCrmStore((state) => state.currentUser);
+  const updateUser = useCrmStore((state) => state.updateUser);
+  const [editingUser, setEditingUser] = useState(null);
+  const [userForm, setUserForm] = useState({ username: '', password: '', confirmPassword: '' });
+  const [userFormError, setUserFormError] = useState('');
 
   // WhatsApp settings helper
   const whatsapp = settings.whatsapp || {
@@ -50,6 +66,101 @@ function Settings() {
     updateSettings({
       whatsapp: { ...whatsapp, ...updates }
     });
+  };
+
+  // EmailJS settings helper
+  const emailjs = settings.emailjs || {
+    enabled: false,
+    serviceId: '',
+    templateId: '',
+    publicKey: ''
+  };
+
+  const updateEmailJSSettings = (updates) => {
+    updateSettings({
+      emailjs: { ...emailjs, ...updates }
+    });
+  };
+
+  const handleTestEmail = async () => {
+    if (!emailjs.serviceId || !emailjs.templateId || !emailjs.publicKey) {
+      setEmailTestResult({ success: false, message: 'Please configure EmailJS first' });
+      return;
+    }
+
+    setTestingEmail(true);
+    setEmailTestResult(null);
+
+    try {
+      const { sendEmail } = await import('../utils/email');
+      await sendEmail({
+        serviceId: emailjs.serviceId,
+        templateId: emailjs.templateId,
+        publicKey: emailjs.publicKey,
+        toEmail: settings.businessEmail || 'test@example.com',
+        toName: 'Test',
+        subject: 'Test Email from CRM',
+        message: 'This is a test email from your CRM system. Email configuration is working correctly!'
+      });
+      setEmailTestResult({ success: true, message: 'Test email sent successfully!' });
+    } catch (error) {
+      setEmailTestResult({ success: false, message: error.message || 'Failed to send test email' });
+    } finally {
+      setTestingEmail(false);
+    }
+  };
+
+  const handleEditUser = (user) => {
+    setEditingUser(user);
+    setUserForm({ username: user.username, password: '', confirmPassword: '' });
+    setUserFormError('');
+  };
+
+  const handleSaveUser = (e) => {
+    e.preventDefault();
+    setUserFormError('');
+
+    // Validate password if provided
+    if (userForm.password) {
+      if (userForm.password.length < 6) {
+        setUserFormError('Password must be at least 6 characters');
+        return;
+      }
+      if (userForm.password !== userForm.confirmPassword) {
+        setUserFormError('Passwords do not match');
+        return;
+      }
+    }
+
+    // Check if username is already taken by another user
+    const usernameTaken = users.some(
+      u => u.username === userForm.username && u.id !== editingUser.id
+    );
+    if (usernameTaken) {
+      setUserFormError('Username already taken');
+      return;
+    }
+
+    // Update user
+    const updates = {
+      username: userForm.username
+    };
+    if (userForm.password) {
+      updates.password = userForm.password;
+    }
+
+    updateUser(editingUser.id, updates);
+
+    // If updating current user, update currentUser in store
+    if (editingUser.id === currentUser.id) {
+      const updatedUser = { ...currentUser, ...updates };
+      useCrmStore.setState({ currentUser: updatedUser });
+    }
+
+    // Reset form
+    setEditingUser(null);
+    setUserForm({ username: '', password: '', confirmPassword: '' });
+    setUserFormError('');
   };
 
   const handleTestWhatsApp = async () => {
@@ -288,6 +399,7 @@ Your WhatsApp notifications are configured correctly.
                 </small>
               </div>
               <div className="form-group">
+              <div className="form-group">
                 <label className="form-label">API Key</label>
                 <input
                   type="text"
@@ -391,6 +503,103 @@ Your WhatsApp notifications are configured correctly.
           </div>
         </div>
 
+        {/* EmailJS Configuration */}
+        <div className="card" style={{ marginTop: '1.5rem' }}>
+          <div className="card-header">
+            <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Mail size={18} style={{ color: '#6366f1' }} />
+              Email Configuration (EmailJS)
+            </h3>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={emailjs.enabled}
+                onChange={(e) => updateEmailJSSettings({ enabled: e.target.checked })}
+              />
+              <span className="toggle-slider"></span>
+            </label>
+          </div>
+          {emailjs.enabled && (
+            <div className="card-body">
+              <div style={{
+                padding: '1rem',
+                background: 'rgba(99, 102, 241, 0.1)',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                borderRadius: 'var(--radius-md)',
+                marginBottom: '1.5rem'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                  <Bell size={16} style={{ color: '#6366f1' }} />
+                  <strong style={{ color: '#6366f1' }}>How to set up EmailJS:</strong>
+                </div>
+                <ol style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', paddingLeft: '1.25rem', margin: 0 }}>
+                  <li style={{ marginBottom: '0.5rem' }}>Go to <a href="https://www.emailjs.com" target="_blank" rel="noopener noreferrer" style={{ color: '#6366f1' }}>emailjs.com</a> and create a free account</li>
+                  <li style={{ marginBottom: '0.5rem' }}>Add your email service (Gmail, Outlook, etc.)</li>
+                  <li style={{ marginBottom: '0.5rem' }}>Create an email template for estimates</li>
+                  <li style={{ marginBottom: '0.5rem' }}>Copy your Service ID, Template ID, and Public Key</li>
+                  <li>Enter them in the fields below</li>
+                </ol>
+              </div>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">Service ID</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="service_xxxxx"
+                    value={emailjs.serviceId}
+                    onChange={(e) => updateEmailJSSettings({ serviceId: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Template ID</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="template_xxxxx"
+                    value={emailjs.templateId}
+                    onChange={(e) => updateEmailJSSettings({ templateId: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Public Key</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="xxxxxxxxxxxxx"
+                  value={emailjs.publicKey}
+                  onChange={(e) => updateEmailJSSettings({ publicKey: e.target.value })}
+                />
+              </div>
+
+              {/* Test Button */}
+              <div style={{ marginTop: '1rem' }}>
+                <button
+                  className="btn btn-secondary"
+                  onClick={handleTestEmail}
+                  disabled={testingEmail || !emailjs.serviceId || !emailjs.templateId || !emailjs.publicKey}
+                >
+                  <Send size={16} />
+                  {testingEmail ? 'Sending...' : 'Send Test Email'}
+                </button>
+                {emailTestResult && (
+                  <span style={{
+                    marginLeft: '1rem',
+                    fontSize: '0.85rem',
+                    color: emailTestResult.success ? 'var(--success)' : 'var(--error)'
+                  }}>
+                    {emailTestResult.success && <CheckCircle2 size={14} style={{ marginRight: '0.25rem', verticalAlign: 'middle' }} />}
+                    {emailTestResult.message}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Status Management */}
         <div className="card" style={{ marginTop: '1.5rem' }}>
           <div className="card-header">
@@ -465,6 +674,94 @@ Your WhatsApp notifications are configured correctly.
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+
+        {/* User Management */}
+        <div className="card" style={{ marginTop: '1.5rem' }}>
+          <div className="card-header">
+            <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Users size={18} />
+              User Management
+            </h3>
+          </div>
+          <div className="card-body">
+            <div style={{ marginBottom: '1rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+              Manage user accounts and credentials. You can update usernames and passwords for all users.
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {users.map((user) => (
+                <div
+                  key={user.id}
+                  style={{
+                    padding: '1rem',
+                    background: 'var(--bg-tertiary)',
+                    borderRadius: 'var(--radius-md)',
+                    border: user.id === currentUser?.id ? '2px solid var(--accent-primary)' : '1px solid var(--border-color)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '1rem'
+                  }}
+                >
+                  <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <div style={{
+                      width: '40px',
+                      height: '40px',
+                      borderRadius: '50%',
+                      background: user.role === 'admin' ? 'var(--accent-primary)20' : 'var(--info)20',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: user.role === 'admin' ? 'var(--accent-primary)' : 'var(--info)'
+                    }}>
+                      {user.role === 'admin' ? <Shield size={20} /> : <User size={20} />}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: '0.5rem',
+                        marginBottom: '0.25rem'
+                      }}>
+                        <strong style={{ color: 'var(--text-primary)' }}>{user.name}</strong>
+                        {user.id === currentUser?.id && (
+                          <span style={{
+                            fontSize: '0.7rem',
+                            padding: '0.125rem 0.5rem',
+                            background: 'var(--accent-primary)20',
+                            color: 'var(--accent-primary)',
+                            borderRadius: 'var(--radius-sm)',
+                            fontWeight: '600'
+                          }}>
+                            You
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
+                        Username: <strong>{user.username}</strong>
+                      </div>
+                      <div style={{ 
+                        fontSize: '0.75rem', 
+                        color: 'var(--text-muted)',
+                        textTransform: 'capitalize'
+                      }}>
+                        Role: {user.role}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => handleEditUser(user)}
+                    style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                  >
+                    <Edit2 size={16} />
+                    Edit
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -588,6 +885,115 @@ Your WhatsApp notifications are configured correctly.
           </div>
         </form>
       </Modal>
+
+      {/* User Edit Modal */}
+      <Modal
+        isOpen={!!editingUser}
+        onClose={() => {
+          setEditingUser(null);
+          setUserForm({ username: '', password: '', confirmPassword: '' });
+          setUserFormError('');
+        }}
+        title={`Edit User: ${editingUser?.name || ''}`}
+      >
+        <form onSubmit={handleSaveUser}>
+          <div className="modal-body">
+            {userFormError && (
+              <div style={{
+                padding: '0.75rem',
+                background: 'var(--error)20',
+                border: '1px solid var(--error)',
+                borderRadius: 'var(--radius-md)',
+                marginBottom: '1rem',
+                color: 'var(--error)',
+                fontSize: '0.9rem'
+              }}>
+                {userFormError}
+              </div>
+            )}
+
+            <div className="form-group">
+              <label className="form-label">Username *</label>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="Enter username"
+                value={userForm.username}
+                onChange={(e) => setUserForm({ ...userForm, username: e.target.value })}
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">New Password</label>
+              <input
+                type="password"
+                className="form-input"
+                placeholder="Leave blank to keep current password"
+                value={userForm.password}
+                onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
+              />
+              <small style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
+                Minimum 6 characters. Leave blank if you don't want to change the password.
+              </small>
+            </div>
+
+            {userForm.password && (
+              <div className="form-group">
+                <label className="form-label">Confirm New Password *</label>
+                <input
+                  type="password"
+                  className="form-input"
+                  placeholder="Confirm new password"
+                  value={userForm.confirmPassword}
+                  onChange={(e) => setUserForm({ ...userForm, confirmPassword: e.target.value })}
+                  required={!!userForm.password}
+                />
+              </div>
+            )}
+
+            <div style={{
+              padding: '1rem',
+              background: 'var(--bg-tertiary)',
+              borderRadius: 'var(--radius-md)',
+              fontSize: '0.85rem',
+              color: 'var(--text-secondary)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                <Key size={16} style={{ color: 'var(--accent-primary)' }} />
+                <strong>User Information:</strong>
+              </div>
+              <div style={{ marginBottom: '0.25rem' }}>
+                <strong>Name:</strong> {editingUser?.name}
+              </div>
+              <div style={{ marginBottom: '0.25rem' }}>
+                <strong>Role:</strong> {editingUser?.role}
+              </div>
+              <div>
+                <strong>Email:</strong> {editingUser?.email || 'N/A'}
+              </div>
+            </div>
+          </div>
+          <div className="modal-footer">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                setEditingUser(null);
+                setUserForm({ username: '', password: '', confirmPassword: '' });
+                setUserFormError('');
+              }}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary">
+              <Lock size={16} />
+              Update Credentials
+            </button>
+          </div>
+        </form>
+      </Modal>
+      </div>
     </>
   );
 }
