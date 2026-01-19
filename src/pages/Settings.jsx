@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useCrmStore } from '../store/crmStore';
 import Modal from '../components/Modal';
 import { getActivationInstructions, sendWhatsAppNotification } from '../utils/whatsapp';
+import { syncManager } from '../services/syncManager';
+import { isSupabaseConfigured, testConnection } from '../lib/supabase';
 import {
   Settings as SettingsIcon,
   Building,
@@ -50,6 +52,12 @@ function Settings() {
   const [editingUser, setEditingUser] = useState(null);
   const [userForm, setUserForm] = useState({ username: '', password: '', confirmPassword: '' });
   const [userFormError, setUserFormError] = useState('');
+  
+  // Supabase sync state
+  const [syncStatus, setSyncStatus] = useState(syncManager.getStatus());
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState('');
+  const [testingConnection, setTestingConnection] = useState(false);
 
   // WhatsApp settings helper
   const whatsapp = settings.whatsapp || {
@@ -114,6 +122,59 @@ function Settings() {
     setEditingUser(user);
     setUserForm({ username: user.username, password: '', confirmPassword: '' });
     setUserFormError('');
+  };
+
+  // Update sync status periodically
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSyncStatus(syncManager.getStatus());
+    }, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleTestConnection = async () => {
+    setTestingConnection(true);
+    setSyncMessage('');
+    try {
+      const result = await testConnection();
+      setSyncMessage(result.message);
+    } catch (error) {
+      setSyncMessage(`Error: ${error.message}`);
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
+  const handleSyncToSupabase = async () => {
+    setSyncing(true);
+    setSyncMessage('');
+    try {
+      const result = await syncManager.manualSync();
+      setSyncMessage(result.message || (result.success ? 'Data synced successfully!' : 'Sync failed'));
+      setSyncStatus(syncManager.getStatus());
+    } catch (error) {
+      setSyncMessage(`Error: ${error.message}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleLoadFromSupabase = async () => {
+    if (!window.confirm('This will replace all local data with data from Supabase. Continue?')) {
+      return;
+    }
+    setSyncing(true);
+    setSyncMessage('');
+    try {
+      await syncManager.loadFromSupabase();
+      setSyncMessage('Data loaded from Supabase successfully!');
+      setSyncStatus(syncManager.getStatus());
+      window.location.reload(); // Reload to show new data
+    } catch (error) {
+      setSyncMessage(`Error: ${error.message}`);
+    } finally {
+      setSyncing(false);
+    }
   };
 
   const handleSaveUser = (e) => {
@@ -223,13 +284,37 @@ Your WhatsApp notifications are configured correctly.
   };
 
   const handleExportData = () => {
+    const state = useCrmStore.getState();
     const data = {
-      jobs: useCrmStore.getState().jobs,
-      customers: useCrmStore.getState().customers,
-      services: useCrmStore.getState().services,
-      statuses: useCrmStore.getState().statuses,
-      settings: useCrmStore.getState().settings,
-      exportedAt: new Date().toISOString()
+      // Core data
+      jobs: state.jobs,
+      customers: state.customers,
+      services: state.services,
+      statuses: state.statuses,
+      settings: state.settings,
+      
+      // All modules
+      leads: state.leads,
+      leadStatuses: state.leadStatuses,
+      invoices: state.invoices,
+      estimates: state.estimates,
+      expenses: state.expenses,
+      expenseCategories: state.expenseCategories,
+      payments: state.payments,
+      tasks: state.tasks,
+      projects: state.projects,
+      tickets: state.tickets,
+      ticketStatuses: state.ticketStatuses,
+      ticketPriorities: state.ticketPriorities,
+      knowledgeBase: state.knowledgeBase,
+      contracts: state.contracts,
+      events: state.events,
+      staff: state.staff,
+      goals: state.goals,
+      users: state.users,
+      
+      exportedAt: new Date().toISOString(),
+      version: '2.0'
     };
     
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -254,11 +339,33 @@ Your WhatsApp notifications are configured correctly.
           // Reset the store with imported data
           localStorage.setItem('crm-storage', JSON.stringify({
             state: {
+              // Core data
               jobs: data.jobs || [],
               customers: data.customers || [],
               services: data.services || [],
               statuses: data.statuses || [],
-              settings: data.settings || {}
+              settings: data.settings || {},
+              
+              // All modules
+              leads: data.leads || [],
+              leadStatuses: data.leadStatuses || [],
+              invoices: data.invoices || [],
+              estimates: data.estimates || [],
+              expenses: data.expenses || [],
+              expenseCategories: data.expenseCategories || [],
+              payments: data.payments || [],
+              tasks: data.tasks || [],
+              projects: data.projects || [],
+              tickets: data.tickets || [],
+              ticketStatuses: data.ticketStatuses || [],
+              ticketPriorities: data.ticketPriorities || [],
+              knowledgeBase: data.knowledgeBase || [],
+              contracts: data.contracts || [],
+              events: data.events || [],
+              staff: data.staff || [],
+              goals: data.goals || [],
+              users: data.users || [],
+              currentUser: data.currentUser || null
             },
             version: 0
           }));
@@ -789,6 +896,109 @@ Your WhatsApp notifications are configured correctly.
                   style={{ display: 'none' }}
                 />
               </label>
+            </div>
+
+            {/* Supabase Sync */}
+            <div style={{
+              padding: '1.5rem',
+              background: isSupabaseConfigured() ? 'rgba(34, 197, 94, 0.1)' : 'rgba(99, 102, 241, 0.1)',
+              border: `1px solid ${isSupabaseConfigured() ? 'rgba(34, 197, 94, 0.3)' : 'rgba(99, 102, 241, 0.3)'}`,
+              borderRadius: 'var(--radius-md)',
+              marginBottom: '1.5rem'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+                <SettingsIcon size={18} style={{ color: isSupabaseConfigured() ? '#22c55e' : '#6366f1' }} />
+                <h4 style={{ color: isSupabaseConfigured() ? '#22c55e' : '#6366f1', margin: 0 }}>
+                  Supabase Cloud Sync
+                </h4>
+              </div>
+
+              {!isSupabaseConfigured() ? (
+                <div>
+                  <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                    Set up Supabase to automatically sync your data across all devices in real-time.
+                  </p>
+                  <ol style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', paddingLeft: '1.5rem', marginBottom: '1rem' }}>
+                    <li>Create a free account at <a href="https://supabase.com" target="_blank" rel="noopener noreferrer" style={{ color: '#6366f1' }}>supabase.com</a></li>
+                    <li>Create a new project</li>
+                    <li>Run the SQL schema from <code style={{ background: 'var(--bg-tertiary)', padding: '0.2rem 0.4rem', borderRadius: '4px' }}>supabase-schema.sql</code></li>
+                    <li>Add your credentials to <code style={{ background: 'var(--bg-tertiary)', padding: '0.2rem 0.4rem', borderRadius: '4px' }}>.env</code> file</li>
+                    <li>See <code style={{ background: 'var(--bg-tertiary)', padding: '0.2rem 0.4rem', borderRadius: '4px' }}>SUPABASE_SETUP.md</code> for detailed instructions</li>
+                  </ol>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                    Once configured, your data will sync automatically across all devices!
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+                    <div style={{
+                      width: '8px',
+                      height: '8px',
+                      borderRadius: '50%',
+                      background: syncStatus.isSyncing ? '#f59e0b' : '#22c55e'
+                    }} />
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                      {syncStatus.isSyncing ? 'Syncing...' : 'Connected'}
+                    </span>
+                    {syncStatus.lastSyncTime && (
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
+                        Last sync: {new Date(syncStatus.lastSyncTime).toLocaleTimeString()}
+                      </span>
+                    )}
+                  </div>
+
+                  {syncMessage && (
+                    <div style={{
+                      padding: '0.75rem',
+                      background: syncMessage.includes('success') || syncMessage.includes('Connected') 
+                        ? 'rgba(34, 197, 94, 0.2)' 
+                        : 'rgba(239, 68, 68, 0.2)',
+                      border: `1px solid ${syncMessage.includes('success') || syncMessage.includes('Connected') 
+                        ? 'rgba(34, 197, 94, 0.4)' 
+                        : 'rgba(239, 68, 68, 0.4)'}`,
+                      borderRadius: 'var(--radius-sm)',
+                      marginBottom: '1rem',
+                      fontSize: '0.85rem',
+                      color: syncMessage.includes('success') || syncMessage.includes('Connected') 
+                        ? '#22c55e' 
+                        : '#ef4444'
+                    }}>
+                      {syncMessage}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={handleTestConnection}
+                      disabled={testingConnection}
+                    >
+                      {testingConnection ? 'Testing...' : 'Test Connection'}
+                    </button>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={handleSyncToSupabase}
+                      disabled={syncing}
+                    >
+                      <Upload size={16} />
+                      {syncing ? 'Syncing...' : 'Sync to Supabase'}
+                    </button>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={handleLoadFromSupabase}
+                      disabled={syncing}
+                    >
+                      <Download size={16} />
+                      Load from Supabase
+                    </button>
+                  </div>
+
+                  <div style={{ marginTop: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    <strong>Real-time sync:</strong> Changes are automatically synced every 30 seconds and appear on all devices instantly.
+                  </div>
+                </div>
+              )}
             </div>
 
             <div style={{ 

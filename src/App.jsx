@@ -1,5 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import { useCrmStore } from './store/crmStore';
+import { syncManager } from './services/syncManager';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 import Login from './pages/Login';
@@ -80,6 +82,22 @@ function AppRoutes() {
 }
 
 function App() {
+  useEffect(() => {
+    // Initialize Supabase sync manager
+    syncManager.initialize().then((result) => {
+      if (result.success) {
+        console.log('Supabase sync initialized');
+      } else {
+        console.log('Supabase not configured or failed to initialize:', result.message);
+      }
+    });
+
+    // Cleanup on unmount
+    return () => {
+      syncManager.cleanup();
+    };
+  }, []);
+
   return (
     <BrowserRouter>
       <AppRoutes />

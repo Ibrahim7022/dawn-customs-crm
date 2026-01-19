@@ -103,6 +103,48 @@ ${data.estimateLink}
 ━━━━━━━━━━━━━━━
 📅 ${timestamp}`;
 
+    case 'job_status_customer':
+      if (data.isCompleted) {
+        return `✅ *YOUR VEHICLE IS READY!*
+━━━━━━━━━━━━━━━
+${data.businessName}
+
+🎉 Great news! Your vehicle customization is complete and ready for pickup.
+
+🚗 *Vehicle Details:*
+${data.vehicleMake} ${data.vehicleModel}
+Plate: ${data.licensePlate}
+
+${data.totalPrice ? `💰 Total: ₹${data.totalPrice.toLocaleString()}` : ''}
+
+Please contact us to schedule a convenient pickup time.
+
+Thank you for choosing ${data.businessName}! 🚀
+━━━━━━━━━━━━━━━
+📅 ${timestamp}`;
+      } else {
+        return `🔄 *JOB STATUS UPDATE*
+━━━━━━━━━━━━━━━
+${data.businessName}
+
+Your vehicle customization status has been updated.
+
+🚗 *Vehicle:*
+${data.vehicleMake} ${data.vehicleModel}
+Plate: ${data.licensePlate}
+
+📊 *Status Update:*
+Previous: ${data.oldStatus}
+Current: *${data.newStatus}*
+${data.note ? `\n📝 Note: ${data.note}` : ''}
+
+We'll keep you updated as your vehicle progresses!
+
+Thank you for choosing ${data.businessName}! 🚀
+━━━━━━━━━━━━━━━
+📅 ${timestamp}`;
+      }
+
     case 'job_deleted':
       return `🗑️ *JOB DELETED*
 ━━━━━━━━━━━━━━━

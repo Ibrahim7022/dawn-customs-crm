@@ -7,6 +7,7 @@ import Modal from '../components/Modal';
 import StatusBadge from '../components/StatusBadge';
 import EmptyState from '../components/EmptyState';
 import { format } from 'date-fns';
+import { v4 as uuidv4 } from 'uuid';
 import {
   Plus,
   Search,
@@ -17,8 +18,12 @@ import {
   Eye,
   Edit2,
   Trash2,
-  Calendar
+  Calendar,
+  Upload,
+  X,
+  Image as ImageIcon
 } from 'lucide-react';
+import { filesToBase64, validateImageFile, getBase64ImageUrl } from '../utils/imageUpload';
 
 function Jobs() {
   const navigate = useNavigate();
@@ -30,6 +35,7 @@ function Jobs() {
   const updateJob = useCrmStore((state) => state.updateJob);
   const deleteJob = useCrmStore((state) => state.deleteJob);
   const addCustomer = useCrmStore((state) => state.addCustomer);
+  const addJobImage = useCrmStore((state) => state.addJobImage);
   const { notifyNewJob, notifyNewCustomer } = useNotifications();
   const { format: formatCurrency } = useCurrency();
 
@@ -55,6 +61,7 @@ function Jobs() {
     estimatedCompletion: '',
     status: 'received'
   });
+  const [jobImages, setJobImages] = useState([]); // Array of { file, preview }
 
   const filteredJobs = useMemo(() => {
     return jobs.filter(job => {
@@ -79,6 +86,12 @@ function Jobs() {
   }, [filteredJobs, statuses]);
 
   const handleOpenModal = (job = null) => {
+    // Clean up image previews
+    jobImages.forEach(img => {
+      if (img.preview) URL.revokeObjectURL(img.preview);
+    });
+    setJobImages([]);
+
     if (job) {
       setEditingJob(job);
       setFormData({
@@ -161,14 +174,40 @@ function Jobs() {
       totalPrice
     };
 
+    let newJobId;
     if (editingJob) {
       updateJob(editingJob.id, jobData);
+      newJobId = editingJob.id;
     } else {
+      const newJob = { ...jobData, id: uuidv4() };
       addJob(jobData);
+      // Get the job ID (will be the last one added)
+      const allJobs = useCrmStore.getState().jobs;
+      newJobId = allJobs[allJobs.length - 1].id;
       // Send new job notification
       notifyNewJob(jobData);
     }
 
+    // Save images if any
+    if (jobImages.length > 0 && newJobId) {
+      try {
+        const imagePromises = jobImages.map(async (imgData) => {
+          const base64 = await filesToBase64([imgData.file]);
+          return base64[0];
+        });
+        const base64Images = await Promise.all(imagePromises);
+        
+        base64Images.forEach((base64Data) => {
+          addJobImage(newJobId, formData.status, base64Data);
+        });
+      } catch (error) {
+        console.error('Failed to save images:', error);
+        alert('Job created but some images failed to upload. Please add them manually.');
+      }
+    }
+
+    // Reset form
+    setJobImages([]);
     setIsModalOpen(false);
   };
 
@@ -185,6 +224,43 @@ function Jobs() {
         ? prev.services.filter(id => id !== serviceId)
         : [...prev.services, serviceId]
     }));
+  };
+
+  const handleImageUpload = async (e) => {
+    const files = Array.from(e.target.files);
+    const validFiles = [];
+    const errors = [];
+
+    for (const file of files) {
+      const validation = validateImageFile(file);
+      if (validation.valid) {
+        const preview = URL.createObjectURL(file);
+        validFiles.push({ file, preview, id: Date.now() + Math.random() });
+      } else {
+        errors.push(`${file.name}: ${validation.error}`);
+      }
+    }
+
+    if (errors.length > 0) {
+      alert(errors.join('\n'));
+    }
+
+    if (validFiles.length > 0) {
+      setJobImages(prev => [...prev, ...validFiles]);
+    }
+
+    // Reset input
+    e.target.value = '';
+  };
+
+  const handleRemoveImage = (imageId) => {
+    setJobImages(prev => {
+      const image = prev.find(img => img.id === imageId);
+      if (image && image.preview) {
+        URL.revokeObjectURL(image.preview);
+      }
+      return prev.filter(img => img.id !== imageId);
+    });
   };
 
   const getCustomerName = (customerId) => {
@@ -608,6 +684,125 @@ function Jobs() {
                 onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                 rows={3}
               />
+            </div>
+
+            {/* Image Upload */}
+            <div className="form-group">
+              <label className="form-label">
+                <ImageIcon size={16} style={{ marginRight: '0.5rem', verticalAlign: 'middle' }} />
+                Images for {statuses.find(s => s.id === formData.status)?.name || 'Current Status'}
+              </label>
+              <div style={{
+                border: '2px dashed var(--border-color)',
+                borderRadius: 'var(--radius-md)',
+                padding: '1rem',
+                textAlign: 'center',
+                background: 'var(--bg-tertiary)',
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.currentTarget.style.borderColor = 'var(--accent-primary)';
+                e.currentTarget.style.background = 'var(--accent-primary)10';
+              }}
+              onDragLeave={(e) => {
+                e.currentTarget.style.borderColor = 'var(--border-color)';
+                e.currentTarget.style.background = 'var(--bg-tertiary)';
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.currentTarget.style.borderColor = 'var(--border-color)';
+                e.currentTarget.style.background = 'var(--bg-tertiary)';
+                const files = Array.from(e.dataTransfer.files);
+                if (files.length > 0) {
+                  const event = { target: { files: files, value: '' } };
+                  handleImageUpload(event);
+                }
+              }}
+              >
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleImageUpload}
+                  style={{ display: 'none' }}
+                  id="job-image-upload"
+                />
+                <label
+                  htmlFor="job-image-upload"
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <Upload size={24} style={{ color: 'var(--text-muted)' }} />
+                  <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                    Click to upload or drag and drop
+                  </span>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                    JPEG, PNG, GIF, WebP (Max 5MB each)
+                  </span>
+                </label>
+              </div>
+
+              {/* Image Previews */}
+              {jobImages.length > 0 && (
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))',
+                  gap: '0.75rem',
+                  marginTop: '1rem'
+                }}>
+                  {jobImages.map((img) => (
+                    <div
+                      key={img.id}
+                      style={{
+                        position: 'relative',
+                        aspectRatio: '1',
+                        borderRadius: 'var(--radius-md)',
+                        overflow: 'hidden',
+                        border: '1px solid var(--border-color)'
+                      }}
+                    >
+                      <img
+                        src={img.preview}
+                        alt="Preview"
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover'
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveImage(img.id)}
+                        style={{
+                          position: 'absolute',
+                          top: '0.25rem',
+                          right: '0.25rem',
+                          width: '24px',
+                          height: '24px',
+                          borderRadius: '50%',
+                          background: 'rgba(0, 0, 0, 0.7)',
+                          border: 'none',
+                          color: 'white',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: 0
+                        }}
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 

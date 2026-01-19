@@ -172,6 +172,48 @@ export const useCrmStore = create(
         })
       })),
 
+      addJobImage: (jobId, status, imageData) => set((state) => ({
+        jobs: state.jobs.map(job => {
+          if (job.id === jobId) {
+            const images = job.images || {};
+            const statusImages = images[status] || [];
+            const newImage = {
+              id: uuidv4(),
+              data: imageData,
+              status: status,
+              uploadedAt: new Date().toISOString()
+            };
+            return {
+              ...job,
+              images: {
+                ...images,
+                [status]: [...statusImages, newImage]
+              },
+              updatedAt: new Date().toISOString()
+            };
+          }
+          return job;
+        })
+      })),
+
+      deleteJobImage: (jobId, status, imageId) => set((state) => ({
+        jobs: state.jobs.map(job => {
+          if (job.id === jobId) {
+            const images = job.images || {};
+            const statusImages = images[status] || [];
+            return {
+              ...job,
+              images: {
+                ...images,
+                [status]: statusImages.filter(img => img.id !== imageId)
+              },
+              updatedAt: new Date().toISOString()
+            };
+          }
+          return job;
+        })
+      })),
+
       deleteJob: (id) => set((state) => ({
         jobs: state.jobs.filter(job => job.id !== id)
       })),

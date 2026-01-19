@@ -20,8 +20,12 @@ import {
   FileText,
   Wrench,
   ChevronRight,
-  MessageSquare
+  MessageSquare,
+  Upload,
+  X,
+  Image as ImageIcon
 } from 'lucide-react';
+import { filesToBase64, validateImageFile, getBase64ImageUrl } from '../utils/imageUpload';
 
 function JobDetails() {
   const { id } = useParams();
@@ -32,12 +36,15 @@ function JobDetails() {
   const services = useCrmStore((state) => state.services);
   const updateJob = useCrmStore((state) => state.updateJob);
   const deleteJob = useCrmStore((state) => state.deleteJob);
+  const addJobImage = useCrmStore((state) => state.addJobImage);
+  const deleteJobImage = useCrmStore((state) => state.deleteJobImage);
   const { notifyStatusUpdate, notifyJobDeleted } = useNotifications();
   const { format: formatCurrency } = useCurrency();
 
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   const [newStatus, setNewStatus] = useState('');
   const [statusNote, setStatusNote] = useState('');
+  const [statusImages, setStatusImages] = useState([]); // Array of { file, preview }
 
   const job = jobs.find(j => j.id === id);
   const customer = job ? customers.find(c => c.id === job.customerId) : null;
@@ -68,11 +75,77 @@ function JobDetails() {
         statusNote: statusNote
       });
       
+      // Save images if any
+      if (statusImages.length > 0) {
+        try {
+          const imagePromises = statusImages.map(async (imgData) => {
+            const base64 = await filesToBase64([imgData.file]);
+            return base64[0];
+          });
+          const base64Images = await Promise.all(imagePromises);
+          
+          base64Images.forEach((base64Data) => {
+            addJobImage(job.id, newStatus, base64Data);
+          });
+        } catch (error) {
+          console.error('Failed to save images:', error);
+          alert('Status updated but some images failed to upload. Please add them manually.');
+        }
+      }
+      
       // Send WhatsApp notification
       await notifyStatusUpdate(job, oldStatus, newStatus, statusNote);
     }
+    
+    // Clean up
+    statusImages.forEach(img => {
+      if (img.preview) URL.revokeObjectURL(img.preview);
+    });
+    setStatusImages([]);
     setIsStatusModalOpen(false);
     setStatusNote('');
+  };
+
+  const handleImageUpload = async (e) => {
+    const files = Array.from(e.target.files);
+    const validFiles = [];
+    const errors = [];
+
+    for (const file of files) {
+      const validation = validateImageFile(file);
+      if (validation.valid) {
+        const preview = URL.createObjectURL(file);
+        validFiles.push({ file, preview, id: Date.now() + Math.random() });
+      } else {
+        errors.push(`${file.name}: ${validation.error}`);
+      }
+    }
+
+    if (errors.length > 0) {
+      alert(errors.join('\n'));
+    }
+
+    if (validFiles.length > 0) {
+      setStatusImages(prev => [...prev, ...validFiles]);
+    }
+
+    e.target.value = '';
+  };
+
+  const handleRemoveImage = (imageId) => {
+    setStatusImages(prev => {
+      const image = prev.find(img => img.id === imageId);
+      if (image && image.preview) {
+        URL.revokeObjectURL(image.preview);
+      }
+      return prev.filter(img => img.id !== imageId);
+    });
+  };
+
+  const handleDeleteStoredImage = (status, imageId) => {
+    if (window.confirm('Are you sure you want to delete this image?')) {
+      deleteJobImage(job.id, status, imageId);
+    }
   };
 
   const handleDelete = async () => {
@@ -405,12 +478,141 @@ function JobDetails() {
             )}
           </div>
         </div>
+
+        {/* Job Images */}
+        {job.images && Object.keys(job.images).length > 0 && (
+          <div className="card" style={{ marginTop: '1.5rem' }}>
+            <div className="card-header">
+              <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <ImageIcon size={18} />
+                Job Images
+              </h3>
+            </div>
+            <div className="card-body">
+              {Object.entries(job.images).map(([status, images]) => {
+                const statusInfo = statuses.find(s => s.id === status);
+                if (!images || images.length === 0) return null;
+                
+                return (
+                  <div key={status} style={{ marginBottom: '2rem' }}>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      marginBottom: '1rem',
+                      paddingBottom: '0.75rem',
+                      borderBottom: '1px solid var(--border-color)'
+                    }}>
+                      <div style={{
+                        width: '8px',
+                        height: '8px',
+                        borderRadius: '50%',
+                        background: statusInfo?.color || 'var(--accent-primary)'
+                      }} />
+                      <h4 style={{ fontSize: '1rem', fontWeight: '600' }}>
+                        {statusInfo?.name || status}
+                      </h4>
+                      <span style={{
+                        fontSize: '0.75rem',
+                        color: 'var(--text-muted)',
+                        marginLeft: 'auto'
+                      }}>
+                        {images.length} {images.length === 1 ? 'image' : 'images'}
+                      </span>
+                    </div>
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+                      gap: '1rem'
+                    }}>
+                      {images.map((image) => (
+                        <div
+                          key={image.id}
+                          style={{
+                            position: 'relative',
+                            aspectRatio: '1',
+                            borderRadius: 'var(--radius-md)',
+                            overflow: 'hidden',
+                            border: '1px solid var(--border-color)',
+                            cursor: 'pointer',
+                            transition: 'transform 0.2s'
+                          }}
+                          onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+                          onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                          onClick={() => {
+                            const url = getBase64ImageUrl(image.data);
+                            window.open(url, '_blank');
+                          }}
+                        >
+                          <img
+                            src={getBase64ImageUrl(image.data)}
+                            alt={`${statusInfo?.name || status} - ${format(new Date(image.uploadedAt), 'MMM d, yyyy')}`}
+                            style={{
+                              width: '100%',
+                              height: '100%',
+                              objectFit: 'cover'
+                            }}
+                          />
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteStoredImage(status, image.id);
+                            }}
+                            style={{
+                              position: 'absolute',
+                              top: '0.5rem',
+                              right: '0.5rem',
+                              width: '28px',
+                              height: '28px',
+                              borderRadius: '50%',
+                              background: 'rgba(239, 68, 68, 0.9)',
+                              border: 'none',
+                              color: 'white',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              padding: 0,
+                              transition: 'background 0.2s'
+                            }}
+                            onMouseOver={(e) => e.currentTarget.style.background = 'rgba(239, 68, 68, 1)'}
+                            onMouseOut={(e) => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.9)'}
+                          >
+                            <X size={14} />
+                          </button>
+                          <div style={{
+                            position: 'absolute',
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            background: 'linear-gradient(to top, rgba(0,0,0,0.7), transparent)',
+                            padding: '0.5rem',
+                            fontSize: '0.7rem',
+                            color: 'white'
+                          }}>
+                            {format(new Date(image.uploadedAt), 'MMM d, yyyy')}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Status Update Modal */}
       <Modal
         isOpen={isStatusModalOpen}
-        onClose={() => setIsStatusModalOpen(false)}
+        onClose={() => {
+          statusImages.forEach(img => {
+            if (img.preview) URL.revokeObjectURL(img.preview);
+          });
+          setStatusImages([]);
+          setIsStatusModalOpen(false);
+        }}
         title="Update Status"
       >
         <div className="modal-body">
@@ -435,6 +637,125 @@ function JobDetails() {
               onChange={(e) => setStatusNote(e.target.value)}
               rows={3}
             />
+          </div>
+
+          {/* Image Upload */}
+          <div className="form-group">
+            <label className="form-label">
+              <ImageIcon size={16} style={{ marginRight: '0.5rem', verticalAlign: 'middle' }} />
+              Upload Images for This Status
+            </label>
+            <div style={{
+              border: '2px dashed var(--border-color)',
+              borderRadius: 'var(--radius-md)',
+              padding: '1rem',
+              textAlign: 'center',
+              background: 'var(--bg-tertiary)',
+              cursor: 'pointer',
+              transition: 'all 0.2s'
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.currentTarget.style.borderColor = 'var(--accent-primary)';
+              e.currentTarget.style.background = 'var(--accent-primary)10';
+            }}
+            onDragLeave={(e) => {
+              e.currentTarget.style.borderColor = 'var(--border-color)';
+              e.currentTarget.style.background = 'var(--bg-tertiary)';
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.currentTarget.style.borderColor = 'var(--border-color)';
+              e.currentTarget.style.background = 'var(--bg-tertiary)';
+              const files = Array.from(e.dataTransfer.files);
+              if (files.length > 0) {
+                const event = { target: { files: files, value: '' } };
+                handleImageUpload(event);
+              }
+            }}
+            >
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handleImageUpload}
+                style={{ display: 'none' }}
+                id="status-image-upload"
+              />
+              <label
+                htmlFor="status-image-upload"
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  cursor: 'pointer'
+                }}
+              >
+                <Upload size={24} style={{ color: 'var(--text-muted)' }} />
+                <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                  Click to upload or drag and drop
+                </span>
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                  JPEG, PNG, GIF, WebP (Max 5MB each)
+                </span>
+              </label>
+            </div>
+
+            {/* Image Previews */}
+            {statusImages.length > 0 && (
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))',
+                gap: '0.75rem',
+                marginTop: '1rem'
+              }}>
+                {statusImages.map((img) => (
+                  <div
+                    key={img.id}
+                    style={{
+                      position: 'relative',
+                      aspectRatio: '1',
+                      borderRadius: 'var(--radius-md)',
+                      overflow: 'hidden',
+                      border: '1px solid var(--border-color)'
+                    }}
+                  >
+                    <img
+                      src={img.preview}
+                      alt="Preview"
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover'
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveImage(img.id)}
+                      style={{
+                        position: 'absolute',
+                        top: '0.25rem',
+                        right: '0.25rem',
+                        width: '24px',
+                        height: '24px',
+                        borderRadius: '50%',
+                        background: 'rgba(0, 0, 0, 0.7)',
+                        border: 'none',
+                        color: 'white',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: 0
+                      }}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
         <div className="modal-footer">
