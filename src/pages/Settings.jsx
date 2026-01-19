@@ -379,6 +379,46 @@ Your WhatsApp notifications are configured correctly.
     reader.readAsText(file);
   };
 
+  const handleRestoreDefaults = () => {
+    if (window.confirm('This will restore default job statuses and services. Continue?')) {
+      const defaultStatuses = [
+        { id: 'received', name: 'Received', color: '#6366f1', order: 1 },
+        { id: 'assessment', name: 'Assessment', color: '#f59e0b', order: 2 },
+        { id: 'in-progress', name: 'In Progress', color: '#3b82f6', order: 3 },
+        { id: 'painting', name: 'Painting', color: '#ec4899', order: 4 },
+        { id: 'detailing', name: 'Detailing', color: '#8b5cf6', order: 5 },
+        { id: 'quality-check', name: 'Quality Check', color: '#14b8a6', order: 6 },
+        { id: 'ready', name: 'Ready for Pickup', color: '#22c55e', order: 7 },
+        { id: 'delivered', name: 'Delivered', color: '#64748b', order: 8 },
+      ];
+
+      const defaultServices = [
+        { id: crypto.randomUUID(), name: 'Full Body Wrap', price: 150000, duration: '3-5 days' },
+        { id: crypto.randomUUID(), name: 'Paint Protection Film', price: 120000, duration: '2-3 days' },
+        { id: crypto.randomUUID(), name: 'Ceramic Coating', price: 45000, duration: '1-2 days' },
+        { id: crypto.randomUUID(), name: 'Custom Paint Job', price: 250000, duration: '7-14 days' },
+        { id: crypto.randomUUID(), name: 'Interior Customization', price: 80000, duration: '3-5 days' },
+        { id: crypto.randomUUID(), name: 'Wheel Customization', price: 35000, duration: '1-2 days' },
+        { id: crypto.randomUUID(), name: 'Window Tinting', price: 15000, duration: '1 day' },
+        { id: crypto.randomUUID(), name: 'Audio System Upgrade', price: 60000, duration: '2-3 days' },
+      ];
+
+      // Restore defaults only if they're missing
+      const currentStatuses = useCrmStore.getState().statuses;
+      const currentServices = useCrmStore.getState().services;
+
+      if (!currentStatuses || currentStatuses.length === 0) {
+        useCrmStore.setState({ statuses: defaultStatuses });
+      }
+
+      if (!currentServices || currentServices.length === 0) {
+        useCrmStore.setState({ services: defaultServices });
+      }
+
+      alert('Default statuses and services restored!');
+    }
+  };
+
   const handleClearData = () => {
     if (window.confirm('⚠️ WARNING: This will permanently delete ALL your data including jobs, customers, and services. This action cannot be undone. Are you absolutely sure?')) {
       if (window.confirm('Please confirm one more time. All data will be lost forever.')) {
@@ -999,6 +1039,33 @@ Your WhatsApp notifications are configured correctly.
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* Recovery Section */}
+            <div style={{ 
+              padding: '1rem',
+              background: 'rgba(251, 191, 36, 0.1)',
+              border: '1px solid rgba(251, 191, 36, 0.3)',
+              borderRadius: 'var(--radius-md)',
+              marginBottom: '1.5rem'
+            }}>
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '0.5rem',
+                marginBottom: '0.5rem',
+                color: '#f59e0b'
+              }}>
+                <AlertTriangle size={18} />
+                <strong>Recovery Tools</strong>
+              </div>
+              <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                If your job statuses or services are missing, you can restore the default ones here.
+              </p>
+              <button className="btn btn-secondary" onClick={handleRestoreDefaults}>
+                <CheckCircle2 size={16} />
+                Restore Default Statuses & Services
+              </button>
             </div>
 
             <div style={{ 

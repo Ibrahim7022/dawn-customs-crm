@@ -1,22 +1,40 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { toSupabaseFormat, fromSupabaseFormat } from './dataTransform';
 
 // Generic CRUD operations
 const create = async (table, data) => {
   if (!isSupabaseConfigured()) return { data: null, error: { message: 'Supabase not configured' } };
-  return await supabase.from(table).insert(data).select().single();
+  const transformedData = toSupabaseFormat(data, table);
+  const result = await supabase.from(table).insert(transformedData).select().single();
+  if (result.data) {
+    result.data = fromSupabaseFormat(result.data, table);
+  }
+  return result;
 };
 
 const read = async (table, id = null) => {
   if (!isSupabaseConfigured()) return { data: null, error: { message: 'Supabase not configured' } };
+  let result;
   if (id) {
-    return await supabase.from(table).select('*').eq('id', id).single();
+    result = await supabase.from(table).select('*').eq('id', id).single();
+  } else {
+    result = await supabase.from(table).select('*');
   }
-  return await supabase.from(table).select('*');
+  // Transform snake_case to camelCase
+  if (result.data) {
+    result.data = fromSupabaseFormat(result.data, table);
+  }
+  return result;
 };
 
 const update = async (table, id, data) => {
   if (!isSupabaseConfigured()) return { data: null, error: { message: 'Supabase not configured' } };
-  return await supabase.from(table).update(data).eq('id', id).select().single();
+  const transformedData = toSupabaseFormat(data, table);
+  const result = await supabase.from(table).update(transformedData).eq('id', id).select().single();
+  if (result.data) {
+    result.data = fromSupabaseFormat(result.data, table);
+  }
+  return result;
 };
 
 const remove = async (table, id) => {
@@ -26,7 +44,12 @@ const remove = async (table, id) => {
 
 const upsert = async (table, data) => {
   if (!isSupabaseConfigured()) return { data: null, error: { message: 'Supabase not configured' } };
-  return await supabase.from(table).upsert(data, { onConflict: 'id' }).select();
+  const transformedData = toSupabaseFormat(data, table);
+  const result = await supabase.from(table).upsert(transformedData, { onConflict: 'id' }).select();
+  if (result.data) {
+    result.data = fromSupabaseFormat(result.data, table);
+  }
+  return result;
 };
 
 // Batch operations
@@ -37,7 +60,18 @@ const batchCreate = async (table, items) => {
 
 const batchUpsert = async (table, items) => {
   if (!isSupabaseConfigured()) return { data: null, error: { message: 'Supabase not configured' } };
-  return await supabase.from(table).upsert(items, { onConflict: 'id' }).select();
+  // Skip if empty array
+  if (!items || items.length === 0) {
+    return { data: [], error: null };
+  }
+  // Transform camelCase to snake_case for Supabase
+  const transformedItems = toSupabaseFormat(items, table);
+  const result = await supabase.from(table).upsert(transformedItems, { onConflict: 'id' }).select();
+  // Transform back to camelCase
+  if (result.data) {
+    result.data = fromSupabaseFormat(result.data, table);
+  }
+  return result;
 };
 
 // Real-time subscriptions
@@ -178,7 +212,7 @@ export const settingsService = {
   },
   update: async (settings) => {
     if (!isSupabaseConfigured()) return { data: null, error: { message: 'Supabase not configured' } };
-    return await supabase.from('settings').upsert({ id: 'main', settings, updatedAt: new Date().toISOString() }).select().single();
+    return await supabase.from('settings').upsert({ id: 'main', settings, updated_at: new Date().toISOString() }).select().single();
   },
   subscribe: (callback) => subscribe('settings', callback),
 };
@@ -190,30 +224,58 @@ export const syncAllData = async (localData) => {
   }
 
   try {
-    // Sync all entities
-    const syncPromises = [
-      batchUpsert('jobs', localData.jobs || []),
-      batchUpsert('customers', localData.customers || []),
-      batchUpsert('services', localData.services || []),
-      batchUpsert('statuses', localData.statuses || []),
-      batchUpsert('leads', localData.leads || []),
-      batchUpsert('invoices', localData.invoices || []),
-      batchUpsert('estimates', localData.estimates || []),
-      batchUpsert('expenses', localData.expenses || []),
-      batchUpsert('payments', localData.payments || []),
-      batchUpsert('tasks', localData.tasks || []),
-      batchUpsert('tickets', localData.tickets || []),
+    // Sync all entities with error tracking
+    const syncOperations = [
+      { name: 'jobs', promise: batchUpsert('jobs', localData.jobs || []) },
+      { name: 'customers', promise: batchUpsert('customers', localData.customers || []) },
+      { name: 'services', promise: batchUpsert('services', localData.services || []) },
+      { name: 'statuses', promise: batchUpsert('statuses', localData.statuses || []) },
+      { name: 'leads', promise: batchUpsert('leads', localData.leads || []) },
+      { name: 'invoices', promise: batchUpsert('invoices', localData.invoices || []) },
+      { name: 'estimates', promise: batchUpsert('estimates', localData.estimates || []) },
+      { name: 'expenses', promise: batchUpsert('expenses', localData.expenses || []) },
+      { name: 'payments', promise: batchUpsert('payments', localData.payments || []) },
+      { name: 'tasks', promise: batchUpsert('tasks', localData.tasks || []) },
+      { name: 'tickets', promise: batchUpsert('tickets', localData.tickets || []) },
     ];
 
-    await Promise.all(syncPromises);
+    const syncResults = await Promise.allSettled(syncOperations.map(op => op.promise));
+
+    // Check for errors
+    const errors = [];
+    syncResults.forEach((result, index) => {
+      const operationName = syncOperations[index].name;
+      if (result.status === 'rejected') {
+        errors.push(`${operationName}: ${result.reason?.message || 'Unknown error'}`);
+        console.error(`❌ Failed to sync ${operationName}:`, result.reason);
+      } else if (result.value?.error) {
+        errors.push(`${operationName}: ${result.value.error.message || 'Unknown error'}`);
+        console.error(`❌ Failed to sync ${operationName}:`, result.value.error);
+      } else if (result.value?.data) {
+        console.log(`✅ Synced ${operationName}: ${result.value.data.length} items`);
+      }
+    });
 
     // Sync settings
     if (localData.settings) {
-      await settingsService.update(localData.settings);
+      const settingsResult = await settingsService.update(localData.settings);
+      if (settingsResult.error) {
+        errors.push(`settings: ${settingsResult.error.message || 'Unknown error'}`);
+        console.error('Failed to sync settings:', settingsResult.error);
+      }
+    }
+
+    if (errors.length > 0) {
+      return { 
+        success: false, 
+        message: `Sync completed with errors: ${errors.join('; ')}`,
+        errors 
+      };
     }
 
     return { success: true, message: 'All data synced successfully' };
   } catch (error) {
+    console.error('Sync error:', error);
     return { success: false, message: error.message || 'Failed to sync data' };
   }
 };
